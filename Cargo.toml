@@ -1,0 +1,24 @@
+[package]
+name = "poll-tail"
+version = "0.1.0"
+edition = "2024"
+description = "A simple, polling-based file tailer that gracefully handles log rotation and timestamp parsing."
+keywords = ["tail", "log", "watch", "follow", "poll"]
+categories = [
+    "command-line-utilities",
+    "filesystem",
+    "development-tools",
+    "development-tools::debugging",
+    "parsing",
+]
+authors = ["Cody Wyatt Neiman (xangelix) <neiman@cody.to>"]
+license = "MIT"
+documentation = "https://docs.rs/poll-tail"
+repository = "https://github.com/xangelix/poll-tail"
+
+[dependencies]
+chrono = "0.4"
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,6 +1,6 @@
 [package]
 name = "poll-tail"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "A simple, polling-based file tailer that gracefully handles log rotation and timestamp parsing."
 keywords = ["tail", "log", "watch", "follow", "poll"]

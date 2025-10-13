@@ -30,7 +30,7 @@ poll-tail = "0.1.0" # use the latest version
 
 Here's a basic example that follows a log file and prints new lines as they appear.
 
-```rs
+```rust
 use std::{time::Duration, thread};
 
 use poll_tail::{FileListener, Error};

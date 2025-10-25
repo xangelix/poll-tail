@@ -1,4 +1,6 @@
 #![cfg_attr(not(doctest), doc = include_str!("../README.md"))]
+#![forbid(unsafe_code)]
+#![deny(missing_docs)]
 
 use std::{
     collections::VecDeque,

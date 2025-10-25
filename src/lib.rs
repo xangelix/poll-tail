@@ -301,8 +301,10 @@ impl FileListener {
     /// Enforces the `max_lines` limit on the buffer.
     fn enforce_max_lines(&mut self) {
         if let Some(max) = self.max_lines {
-            while self.buffer.len() > max {
-                self.buffer.pop_front();
+            let len = self.buffer.len();
+            if len > max {
+                let excess = len - max;
+                self.buffer.drain(..excess);
             }
         }
     }

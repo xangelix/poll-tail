@@ -306,6 +306,39 @@ impl FileListener {
             }
         }
     }
+
+    /// Returns the number of buffered lines.
+    #[inline]
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.buffer.len()
+    }
+
+    /// Returns true if there are no buffered lines.
+    #[inline]
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
+    }
+
+    /// Clears all buffered lines.
+    #[inline]
+    pub fn clear(&mut self) {
+        self.buffer.clear();
+    }
+
+    /// Drains and yields all buffered lines.
+    #[inline]
+    pub fn drain(&mut self) -> std::collections::vec_deque::Drain<'_, (DateTime<Utc>, String)> {
+        self.buffer.drain(..)
+    }
+
+    /// Returns the watched path.
+    #[inline]
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
 }
 
 #[cfg(test)]

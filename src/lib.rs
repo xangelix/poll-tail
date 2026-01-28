@@ -231,13 +231,7 @@ impl FileListener {
         }
 
         // After reading, update the metadata to reflect the state we've processed.
-        let metadata = self
-            .reader
-            .as_ref()
-            .ok_or(Error::InternalState("Reader is missing after initial read"))?
-            .get_ref()
-            .metadata()?;
-        self.last_metadata = Some(metadata);
+        self.update_metadata()?;
 
         Ok(())
     }
@@ -288,6 +282,20 @@ impl FileListener {
             line_buf.clear();
         }
         self.enforce_max_lines();
+        Ok(())
+    }
+
+    /// Updates the internal metadata cache from the current reader.
+    fn update_metadata(&mut self) -> Result<()> {
+        let metadata = self
+            .reader
+            .as_ref()
+            .ok_or(Error::InternalState(
+                "Reader missing during metadata update",
+            ))?
+            .get_ref()
+            .metadata()?;
+        self.last_metadata = Some(metadata);
         Ok(())
     }
 

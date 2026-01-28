@@ -38,7 +38,7 @@ pub enum Error {
 pub type LineParser =
     Box<dyn Fn(&str, Option<DateTime<Utc>>) -> (DateTime<Utc>, String) + Send + Sync>;
 
-/// Builds a `FileListener`.
+/// Builds a [`FileListener`] with configurable options.
 pub struct FileListenerBuilder {
     path: PathBuf,
     max_lines: Option<usize>,
@@ -93,8 +93,8 @@ impl FileListenerBuilder {
     ///
     /// # Errors
     ///
-    /// Returns an `Error` if the path exists but is not a regular file, or if
-    /// there are permission issues.
+    /// Returns an [`Error`] if the path exists but is not a regular file, or if
+    /// there are permission issues accessing the file.
     pub fn build(self) -> Result<FileListener> {
         // Use the custom parser or fallback to the default RFC 3339 parser.
         let parser = self.parser.unwrap_or_else(|| Box::new(default_line_parser));
@@ -122,6 +122,8 @@ impl FileListenerBuilder {
 }
 
 /// A listener that monitors a file for changes and captures new lines.
+///
+/// Use [`tick()`](Self::tick) to poll for changes.
 pub struct FileListener {
     path: PathBuf,
     reader: Option<BufReader<File>>,
@@ -141,10 +143,17 @@ impl FileListener {
 
     /// Checks the file for changes and updates the internal line buffer.
     ///
+    /// This method handles:
+    /// - Connecting to the file if it appears.
+    /// - Backfilling lines on the first connection.
+    /// - Detecting truncation or modification and resetting if necessary.
+    /// - Appending new lines as they are written.
+    ///
     /// # Errors
     ///
-    /// Returns an `Error` if filesystem operations fail.
+    /// Returns an [`Error`] if filesystem operations fail (other than `NotFound`, which is handled gracefully).
     pub fn tick(&mut self) -> Result<()> {
+        // 1. Ensure we have an active reader.
         if self.reader.is_none() {
             match try_open_file(&self.path)? {
                 Some((reader, metadata)) => {
@@ -155,11 +164,15 @@ impl FileListener {
             }
         }
 
+        // 2. Handle the initial read (backfill) if this is the first successful tick.
         if self.is_first_tick {
             self.is_first_tick = false;
             return self.handle_first_tick();
         }
 
+        // 3. Handle subsequent updates (append, rotate, truncate).
+        //    We check the path metadata to see if the file state on disk has changed
+        //    in a way that requires a reset (like truncation).
         match std::fs::metadata(&self.path) {
             Ok(current_metadata) => self.handle_subsequent_tick(current_metadata),
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
@@ -232,7 +245,7 @@ impl FileListener {
         Ok(())
     }
 
-    /// Handles change detection on subsequent ticks.
+    /// Handles file changes after the first tick.
     fn handle_subsequent_tick(&mut self, current_metadata: Metadata) -> Result<()> {
         let last_metadata = self
             .last_metadata
@@ -243,6 +256,7 @@ impl FileListener {
         let current_size = current_metadata.len();
 
         let was_truncated = current_size < last_size;
+        // Check if modified in place (same size, newer mtime).
         let was_modified_in_place = {
             let last_mtime = last_metadata.modified()?;
             let current_mtime = current_metadata.modified()?;
@@ -250,6 +264,7 @@ impl FileListener {
         };
 
         if was_truncated || was_modified_in_place {
+            // File was truncated or rewritten. Reset buffer and read from start.
             self.buffer.clear();
             let reader = self
                 .reader
@@ -258,6 +273,7 @@ impl FileListener {
             reader.seek(SeekFrom::Start(0))?;
             self.read_new_lines()?;
         } else if current_size > last_size {
+            // File grew. Read new content.
             self.read_new_lines()?;
         }
 
@@ -265,7 +281,7 @@ impl FileListener {
         Ok(())
     }
 
-    /// Reads all available lines from the reader's current position.
+    /// Reads all available lines from the current reader position.
     fn read_new_lines(&mut self) -> Result<()> {
         let reader = self
             .reader

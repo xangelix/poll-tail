@@ -96,20 +96,8 @@ impl FileListenerBuilder {
     /// Returns an `Error` if the path exists but is not a regular file, or if
     /// there are permission issues.
     pub fn build(self) -> Result<FileListener> {
-        let default_parser = Box::new(|line: &str, last_timestamp: Option<DateTime<Utc>>| {
-            let mut parts = line.splitn(2, char::is_whitespace);
-            let first_word = parts.next().unwrap_or("");
-
-            DateTime::parse_from_rfc3339(first_word).map_or_else(
-                |_| (last_timestamp.unwrap_or_else(Utc::now), line.to_string()),
-                |dt| {
-                    (
-                        dt.with_timezone(&Utc),
-                        parts.next().unwrap_or("").to_string(),
-                    )
-                },
-            )
-        });
+        // Use the custom parser or fallback to the default RFC 3339 parser.
+        let parser = self.parser.unwrap_or_else(|| Box::new(default_line_parser));
 
         let mut listener = FileListener {
             path: self.path,
@@ -119,7 +107,7 @@ impl FileListenerBuilder {
             max_lines: self.max_lines,
             initial_read_lines: self.initial_read_lines,
             is_first_tick: true,
-            parser: self.parser.unwrap_or(default_parser),
+            parser,
         };
 
         match File::open(&listener.path) {
@@ -362,6 +350,27 @@ impl FileListener {
     pub fn path(&self) -> &Path {
         &self.path
     }
+}
+
+/// The default parsing logic.
+/// Expects an RFC 3339 timestamp at the start of the line.
+/// Falls back to `last_timestamp` or `Utc::now()` if parsing fails.
+fn default_line_parser(
+    line: &str,
+    last_timestamp: Option<DateTime<Utc>>,
+) -> (DateTime<Utc>, String) {
+    let mut parts = line.splitn(2, char::is_whitespace);
+    let first_word = parts.next().unwrap_or("");
+
+    DateTime::parse_from_rfc3339(first_word).map_or_else(
+        |_| (last_timestamp.unwrap_or_else(Utc::now), line.to_string()),
+        |dt| {
+            (
+                dt.with_timezone(&Utc),
+                parts.next().unwrap_or("").to_string(),
+            )
+        },
+    )
 }
 
 #[cfg(test)]

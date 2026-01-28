@@ -163,10 +163,8 @@ impl FileListener {
         match std::fs::metadata(&self.path) {
             Ok(current_metadata) => self.handle_subsequent_tick(current_metadata),
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                self.reader = None;
-                self.last_metadata = None;
-                self.buffer.clear();
-                self.is_first_tick = true;
+                // File disappeared (deleted/moved). Reset state and wait for it to reappear.
+                self.reset_state();
                 Ok(())
             }
             Err(e) => Err(e.into()),
@@ -294,6 +292,14 @@ impl FileListener {
         }
         self.enforce_max_lines();
         Ok(())
+    }
+
+    /// Resets the internal state when the watched file disappears.
+    fn reset_state(&mut self) {
+        self.reader = None;
+        self.last_metadata = None;
+        self.buffer.clear();
+        self.is_first_tick = true;
     }
 
     /// Enforces the `max_lines` limit on the buffer.

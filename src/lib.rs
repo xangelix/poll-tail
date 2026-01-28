@@ -36,7 +36,7 @@ pub enum Error {
 /// The function receives the `String` line and the `Option<DateTime<Utc>>` of the
 /// previously parsed line, returning a `(DateTime<Utc>, String)` tuple.
 pub type LineParser =
-    Box<dyn Fn(String, Option<DateTime<Utc>>) -> (DateTime<Utc>, String) + Send + Sync>;
+    Box<dyn Fn(&str, Option<DateTime<Utc>>) -> (DateTime<Utc>, String) + Send + Sync>;
 
 /// Builds a `FileListener`.
 pub struct FileListenerBuilder {
@@ -83,7 +83,7 @@ impl FileListenerBuilder {
     #[must_use]
     pub fn parser<F>(mut self, parser: F) -> Self
     where
-        F: Fn(String, Option<DateTime<Utc>>) -> (DateTime<Utc>, String) + Send + Sync + 'static,
+        F: Fn(&str, Option<DateTime<Utc>>) -> (DateTime<Utc>, String) + Send + Sync + 'static,
     {
         self.parser = Some(Box::new(parser));
         self
@@ -96,12 +96,12 @@ impl FileListenerBuilder {
     /// Returns an `Error` if the path exists but is not a regular file, or if
     /// there are permission issues.
     pub fn build(self) -> Result<FileListener> {
-        let default_parser = Box::new(|line: String, last_timestamp: Option<DateTime<Utc>>| {
+        let default_parser = Box::new(|line: &str, last_timestamp: Option<DateTime<Utc>>| {
             let mut parts = line.splitn(2, char::is_whitespace);
             let first_word = parts.next().unwrap_or("");
 
             DateTime::parse_from_rfc3339(first_word).map_or_else(
-                |_| (last_timestamp.unwrap_or_else(Utc::now), line.clone()),
+                |_| (last_timestamp.unwrap_or_else(Utc::now), line.to_string()),
                 |dt| {
                     (
                         dt.with_timezone(&Utc),
@@ -228,7 +228,7 @@ impl FileListener {
 
             for line in lines.into_iter().rev().take(n_lines).rev() {
                 let last_timestamp = self.buffer.back().map(|(ts, _)| *ts);
-                self.buffer.push_back((self.parser)(line, last_timestamp));
+                self.buffer.push_back((self.parser)(&line, last_timestamp));
             }
         } else {
             // If not backfilling, read the entire file from the current position (start).
@@ -291,7 +291,7 @@ impl FileListener {
         while reader.read_line(&mut line_buf)? > 0 {
             let last_timestamp = self.buffer.back().map(|(ts, _)| *ts);
             self.buffer
-                .push_back((self.parser)(line_buf.clone(), last_timestamp));
+                .push_back((self.parser)(&line_buf, last_timestamp));
             line_buf.clear();
         }
         self.enforce_max_lines();
@@ -518,7 +518,7 @@ mod tests {
         let mut temp_file = NamedTempFile::new().unwrap();
         write_to_file(temp_file.as_file_mut(), "some log line\n");
 
-        let custom_parser = |line: String, _: Option<DateTime<Utc>>| {
+        let custom_parser = |line: &str, _: Option<DateTime<Utc>>| {
             let fake_ts = DateTime::parse_from_rfc3339("2000-01-01T00:00:00Z")
                 .unwrap()
                 .with_timezone(&Utc);

@@ -207,26 +207,47 @@ impl FileListener {
         const AVG_LINE_LEN: u64 = 200;
 
         if let Some(n_lines) = self.initial_read_lines.filter(|&n| n > 0) {
-            // Scope the mutable borrow of the reader to just this block for backfilling.
+            // Scope the mutable borrow of the reader to just this block.
             let reader = self
                 .reader
                 .as_mut()
                 .ok_or(Error::InternalState("Reader missing during first tick"))?;
 
+            // 1. Attempt to seek backwards to avoid reading the whole file.
+            //    We estimate the required bytes based on average line length.
+            //    We multiply by 2 to add a safety buffer (better to read too much than too little).
             let buffer_size = std::cmp::max(8192, AVG_LINE_LEN * n_lines as u64 * 2);
 
             let file_len = reader.get_ref().metadata()?.len();
             let seek_pos = file_len.saturating_sub(buffer_size);
             reader.seek(SeekFrom::Start(seek_pos))?;
 
+            // 2. If we seeked into the middle of the file, discard the first partial line.
             if seek_pos > 0 {
                 let mut discard = String::new();
                 reader.read_line(&mut discard)?;
             }
 
-            let lines: Vec<String> = reader.lines().collect::<io::Result<_>>()?;
+            // 3. Rolling Window Optimization
+            //    Instead of collecting all lines into a huge Vec, we maintain a small
+            //    VecDeque that holds exactly 'n_lines' at any given moment.
+            let mut rolling_window: VecDeque<String> = VecDeque::with_capacity(n_lines);
 
-            for line in lines.into_iter().rev().take(n_lines).rev() {
+            for line_result in reader.lines() {
+                let line = line_result?;
+
+                // Add the new line
+                rolling_window.push_back(line);
+
+                // If we've exceeded our target count, drop the oldest line immediately
+                if rolling_window.len() > n_lines {
+                    rolling_window.pop_front();
+                }
+            }
+
+            // 4. Process the captured lines and move them to the main buffer.
+            //    Note: We don't reverse here because rolling_window is already in chronological order.
+            for line in rolling_window {
                 let last_timestamp = self.buffer.back().map(|(ts, _)| *ts);
                 self.buffer.push_back((self.parser)(&line, last_timestamp));
             }

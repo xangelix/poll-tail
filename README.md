@@ -50,10 +50,13 @@ fn main() -> Result<(), Error> {
         // The core of the library: check the file for changes.
         listener.tick()?;
 
-        // The lines() method gives you access to the internal buffer.
+        // The `lines()` method gives you access to the internal buffer.
         // You would typically process these lines (e.g., send them, display them)
         // and then clear your own state.
-        for (timestamp, line) in listener.lines() {
+        //
+        // We'll use `drain()` here instead to avoid repeating lines in the buffer
+        // since your terminal's stdout is likely storing the lines in your own buffer.
+        for (timestamp, line) in listener.drain() {
             // The default parser extracts RFC 3339 timestamps or uses the
             // last known timestamp as a fallback.
             println!("[{}] {}", timestamp.to_rfc3339(), line.trim_end());

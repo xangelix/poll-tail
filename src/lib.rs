@@ -177,60 +177,56 @@ impl FileListener {
         &self.buffer
     }
 
-    /// Handles the initial read logic.
+    /// Handles the initial logic when the file is first opened.
+    /// Supports efficient backfilling ("tailing") via seeking.
     fn handle_first_tick(&mut self) -> Result<()> {
         const AVG_LINE_LEN: u64 = 200;
 
-        if let Some(n_lines) = self.initial_read_lines.filter(|&n| n > 0) {
-            // Scope the mutable borrow of the reader to just this block.
-            let reader = self
-                .reader
-                .as_mut()
-                .ok_or(Error::InternalState("Reader missing during first tick"))?;
-
-            // 1. Attempt to seek backwards to avoid reading the whole file.
-            //    We estimate the required bytes based on average line length.
-            //    We multiply by 2 to add a safety buffer (better to read too much than too little).
-            let buffer_size = std::cmp::max(8192, AVG_LINE_LEN * n_lines as u64 * 2);
-
-            let file_len = reader.get_ref().metadata()?.len();
-            let seek_pos = file_len.saturating_sub(buffer_size);
-            reader.seek(SeekFrom::Start(seek_pos))?;
-
-            // 2. If we seeked into the middle of the file, discard the first partial line.
-            if seek_pos > 0 {
-                let mut discard = String::new();
-                reader.read_line(&mut discard)?;
+        let n_lines = match self.initial_read_lines {
+            Some(n) if n > 0 => n,
+            _ => {
+                // If no backfill is requested, read from the beginning.
+                return self.read_new_lines();
             }
+        };
 
-            // 3. Rolling Window Optimization
-            //    Instead of collecting all lines into a huge Vec, we maintain a small
-            //    VecDeque that holds exactly 'n_lines' at any given moment.
-            let mut rolling_window: VecDeque<String> = VecDeque::with_capacity(n_lines);
+        let reader = self
+            .reader
+            .as_mut()
+            .ok_or(Error::InternalState("Reader missing during first tick"))?;
 
-            for line_result in reader.lines() {
-                let line = line_result?;
+        // 1. Seek optimization: estimate where to start reading.
+        let file_len = reader.get_ref().metadata()?.len();
+        // Buffer safety margin: 2x the estimated size.
+        let estimated_bytes = AVG_LINE_LEN * n_lines as u64 * 2;
+        let buffer_size = std::cmp::max(8192, estimated_bytes);
+        let seek_pos = file_len.saturating_sub(buffer_size);
 
-                // Add the new line
-                rolling_window.push_back(line);
+        reader.seek(SeekFrom::Start(seek_pos))?;
 
-                // If we've exceeded our target count, drop the oldest line immediately
-                if rolling_window.len() > n_lines {
-                    rolling_window.pop_front();
-                }
-            }
-
-            // 4. Process the captured lines and move them to the main buffer.
-            //    Note: We don't reverse here because rolling_window is already in chronological order.
-            for line in rolling_window {
-                push_parsed_line(&mut self.buffer, &self.parser, &line);
-            }
-        } else {
-            // If not backfilling, read the entire file from the current position (start).
-            self.read_new_lines()?;
+        // 2. Discard partial line if we seeked into the middle.
+        if seek_pos > 0 {
+            let mut discard = String::new();
+            reader.read_line(&mut discard)?;
         }
 
-        // After reading, update the metadata to reflect the state we've processed.
+        // 3. Rolling Window: collect exactly the last `n_lines`.
+        let mut rolling_window: VecDeque<String> = VecDeque::with_capacity(n_lines);
+        for line_result in reader.lines() {
+            let line = line_result?;
+            rolling_window.push_back(line);
+            if rolling_window.len() > n_lines {
+                rolling_window.pop_front();
+            }
+        }
+
+        // 4. Commit the window to the main buffer.
+        // We use the standalone helper to avoid any borrow confusion, though NLL might handle it here.
+        for line in rolling_window {
+            push_parsed_line(&mut self.buffer, &self.parser, &line);
+        }
+
+        // 5. Update metadata after reading.
         self.update_metadata()?;
 
         Ok(())

@@ -375,11 +375,12 @@ fn default_line_parser(
 
 #[cfg(test)]
 mod tests {
-    use std::{io::Write, thread::sleep, time::Duration};
+    use std::{fs::File, io::Write, thread::sleep, time::Duration};
 
+    use chrono::{DateTime, Utc};
     use tempfile::NamedTempFile;
 
-    use super::*;
+    use super::{FileListener, Result};
 
     fn write_to_file(file: &mut File, content: &str) {
         file.write_all(content.as_bytes()).unwrap();

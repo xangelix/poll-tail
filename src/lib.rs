@@ -110,17 +110,11 @@ impl FileListenerBuilder {
             parser,
         };
 
-        match File::open(&listener.path) {
-            Ok(file) => {
-                let metadata = file.metadata()?;
-                if !metadata.is_file() {
-                    return Err(Error::PathIsNotAFile(listener.path));
-                }
-                listener.reader = Some(BufReader::new(file));
-                listener.last_metadata = Some(metadata);
-            }
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e.into()),
+        // Attempt to connect immediately during build.
+        // We propagate errors (like PermissionDenied) but ignore NotFound.
+        if let Some((reader, metadata)) = try_open_file(&listener.path)? {
+            listener.reader = Some(reader);
+            listener.last_metadata = Some(metadata);
         }
 
         Ok(listener)
@@ -152,17 +146,12 @@ impl FileListener {
     /// Returns an `Error` if filesystem operations fail.
     pub fn tick(&mut self) -> Result<()> {
         if self.reader.is_none() {
-            match File::open(&self.path) {
-                Ok(file) => {
-                    let metadata = file.metadata()?;
-                    if !metadata.is_file() {
-                        return Err(Error::PathIsNotAFile(self.path.clone()));
-                    }
-                    self.reader = Some(BufReader::new(file));
+            match try_open_file(&self.path)? {
+                Some((reader, metadata)) => {
+                    self.reader = Some(reader);
                     self.last_metadata = Some(metadata);
                 }
-                Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
-                Err(e) => return Err(e.into()),
+                None => return Ok(()), // File still not found, wait for next tick.
             }
         }
 
@@ -349,6 +338,26 @@ impl FileListener {
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
+    }
+}
+
+/// Attempts to open a file and validate it.
+///
+/// Returns:
+/// - `Ok(Some((reader, metadata)))` if the file exists and is a regular file.
+/// - `Ok(None)` if the file does not exist (`NotFound`).
+/// - `Err(Error)` if the path is a directory or other IO errors occur.
+fn try_open_file(path: &Path) -> Result<Option<(BufReader<File>, Metadata)>> {
+    match File::open(path) {
+        Ok(file) => {
+            let metadata = file.metadata()?;
+            if !metadata.is_file() {
+                return Err(Error::PathIsNotAFile(path.to_path_buf()));
+            }
+            Ok(Some((BufReader::new(file), metadata)))
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e.into()),
     }
 }
 

@@ -223,8 +223,7 @@ impl FileListener {
             // 4. Process the captured lines and move them to the main buffer.
             //    Note: We don't reverse here because rolling_window is already in chronological order.
             for line in rolling_window {
-                let last_timestamp = self.buffer.back().map(|(ts, _)| *ts);
-                self.buffer.push_back((self.parser)(&line, last_timestamp));
+                push_parsed_line(&mut self.buffer, &self.parser, &line);
             }
         } else {
             // If not backfilling, read the entire file from the current position (start).
@@ -285,9 +284,7 @@ impl FileListener {
 
         let mut line_buf = String::new();
         while reader.read_line(&mut line_buf)? > 0 {
-            let last_timestamp = self.buffer.back().map(|(ts, _)| *ts);
-            self.buffer
-                .push_back((self.parser)(&line_buf, last_timestamp));
+            push_parsed_line(&mut self.buffer, &self.parser, &line_buf);
             line_buf.clear();
         }
         self.enforce_max_lines();
@@ -345,6 +342,22 @@ impl FileListener {
     pub fn path(&self) -> &Path {
         &self.path
     }
+}
+
+// --- Internal Helpers ---
+
+/// Parses a raw line and appends it to the buffer.
+///
+/// This is a standalone function to allow disjoint borrowing of
+/// `reader` and `buffer`/`parser` in the caller.
+fn push_parsed_line(
+    buffer: &mut VecDeque<(DateTime<Utc>, String)>,
+    parser: &LineParser,
+    line: &str,
+) {
+    let last_timestamp = buffer.back().map(|(ts, _)| *ts);
+    let entry = parser(line, last_timestamp);
+    buffer.push_back(entry);
 }
 
 /// Attempts to open a file and validate it.
